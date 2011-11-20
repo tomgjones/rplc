@@ -3,11 +3,14 @@
 use strict;
 use warnings FATAL => 'all';
 
-use File::Temp;
+use File::stat;
 use Getopt::Long qw( :config bundling no_ignore_case require_order );
+use IO::File;
 use Pod::Usage;
 use Readonly;
+use String::Random qw(random_regex);
 
+Readonly my $EX_GENERAL => 2;
 Readonly my $EX_USAGE => 64;
 Readonly my $EX_SUBPROC => 100;
 Readonly my $EX_TMPPERM => 102;
@@ -24,31 +27,56 @@ Readonly my $EX_INTERNAL => 200;
   Replace contents of FILE with rplc's standard input or output of PROG.
 
   OPTIONS
+  -e,--exit            exit 1 if file changed
+  -n,--dry-run         report on changes but don't finally apply
   -q,--quiet           don't show diffs
   -b,--backup=BUPFILE  make a backup copy to BUPFILE on change
-  -c,--ctime           update ctime if unchanged
+  -t,--mtime           update mtime if unchanged
+  -m,--mode=MODE       set file's mode in octal
+  -o,--owner=OWNER     set file's owner
+  -g,--group=GROUP     set file's group
   -O,--no-owner        don't try to preserve owner
   -G,--no-group        don't try to preserve group
-  -o,--no-ownership    don't try to preserve owner or group
+  -W,--no-ownership    don't try to preserve owner or group
   -M,--no-mode         don't try to preserve mode
   -T,--no-text         content is not plain text
 
 =cut
 
 my ($opt_quiet, $opt_mtime, $opt_no_owner, $opt_no_group, $opt_no_ownership,
-    $opt_no_mode, $opt_backup, $opt_no_text);
+    $opt_no_mode, $opt_backup, $opt_no_text, $opt_exit_1_on_change,
+    $opt_dry_run, $opt_mode, $opt_owner, $opt_group);
 
 GetOptions(
+    'e|exit'         => \$opt_exit_1_on_change,
+    'n|dry-run'      => \$opt_dry_run,
     'q|quiet'        => \$opt_quiet,
+    'b|backup=s'     => \$opt_backup,
     't|mtime'        => \$opt_mtime,
+    'm|mode=s'       => \$opt_mode,
+    'o|owner=s'      => \$opt_owner,
+    'g|group=s'      => \$opt_group,
     'O|no-owner'     => \$opt_no_owner,
     'G|no-group'     => \$opt_no_group,
-    'w|no-ownership' => \$opt_no_ownership,
+    'W|no-ownership' => \$opt_no_ownership,
     'M|no-mode'      => \$opt_no_mode,
-    'b|backup=s'     => \$opt_backup,
     'T|no-text'      => \$opt_no_text,
 )
     or pod2usage(-verbose => 0, -exitval => $EX_USAGE);
+
+$opt_no_ownership and ($opt_owner || $opt_group) and pod2usage(
+    -exitval => $EX_USAGE,
+    -message => "-W,--no-ownership conflicts with -o,--owner and -g,--group",
+);
+
+$opt_no_owner and defined($opt_owner) and pod2usage( -exitval => $EX_USAGE,
+    -message => "-o,--owner conflicts with -O,--no-owner");
+
+$opt_no_group and defined($opt_group) and pod2usage( -exitval => $EX_USAGE,
+    -message => "-g,--group conflicts with -G,--no-group");
+
+$opt_no_mode and defined($opt_mode) and pod2usage( -exitval => $EX_USAGE,
+    -message => "-m,--mode conflicts with -M,--no-mode");
 
 my $conf_do_owner = not $opt_no_owner // $opt_no_ownership;
 my $conf_do_group = not $opt_no_group // $opt_no_ownership;
@@ -63,60 +91,126 @@ defined($FILE) or pod2usage(
 my $input;
 
 if (defined($PROG)) {
-    open($input, "-|", $PROG, @ARGS) or ($! = 1, die "rplc: $PROG: $!\n");
+    open($input, "-|", $PROG, @ARGS) or err_general("$!: $PROG\n");
 }
 else {
     $input = \*STDIN;
 }
 
-my $output;
-eval {
-    $output = File::Temp->new(TEMPLATE => "$FILE.rplc.tmp.XXXXXXXXXX");
-};
-if ($@) {
-    # note: $! also is 'Permission denied' here
+my $tmpname = $FILE . ".rplc.tmp." . random_regex('\w{16}');
 
-    # File::Temp doesn't really have a well-specified enough API to be
-    # doing this.
-    if ($@ =~ 'Could not create temp file (.+): Permission denied') {
-        my $failfile = $1;
-        print "rplc: $failfile: Permission denied\n";
-        exit $EX_TMPPERM;
-    }
-    else {
-        print "rplc: internal error: $@\n";
-        exit $EX_INTERNAL;
+defined(my $output = IO::File->new($tmpname, O_CREAT|O_WRONLY)) or do {
+    warn "$!: $tmpname\n";
+    exit $EX_GENERAL;
+};
+
+my $st = stat($FILE);
+
+my $cur_mode = defined($st) ? $st->mode  : undef;
+my $cur_own  = defined($st) ? $st->uid   : undef;
+my $cur_gr   = defined($st) ? $st->gid   : undef;
+
+defined(my $tmpst = stat($output)) or intl_err("couldn't stat own output");
+
+# Work out the target mode, user, group, in outer block, as they'll come in
+# handy later too if we need to chmod / chown the file in place.
+my $targ_mode = $opt_mode // $cur_mode;
+
+my $targ_owner_id;
+if ($opt_owner) {
+    defined($targ_owner_id = getpwnam($opt_owner))
+        or general_err("failed to lookup user $opt_owner: $!\n");
+}
+elsif (defined($cur_own)) {
+    $targ_owner_id = $cur_own;
+}
+
+my $targ_gid;
+if ($opt_group) {
+    defined($targ_gid = getgrnam($opt_group))
+        or general_err("failed to lookup group $opt_group: $!\n");
+}
+elsif (defined($cur_gr)) {
+    $targ_gid = $cur_gr;
+}
+
+
+if (!$opt_no_mode && defined($targ_mode)) {
+    chmod($targ_mode, $tmpname) or general_err("$!: chmod $targ_mode");
+}
+
+if ($conf_do_owner) {
+    if (defined($targ_owner_id) and $targ_owner_id != $tmpst->uid) {
+        chown($targ_owner_id, -1, $output) or general_err("$!: chown failed");
     }
 }
 
-# FIXME: set user, group, mode on output file
+if ($conf_do_group) {
+    if (defined($targ_gid) and $targ_gid != $tmpst->gid) {
+        chown(-1, $targ_gid, $output) or general_err("$!: chown failed");
+    }
+}
 
 while (<$input>) {
     print $output $_;
 }
+$output->close;
+
 
 if (defined($PROG)) {
     wait;
 }
 
 my $isdifferent;
-if (! -f $FILE) {
-    $isdifferent = 1;
-}
-elsif ($opt_quiet or $opt_no_text) {
-    $isdifferent = is_different_cmp($FILE, $output->filename);
+
+if ($opt_quiet or $opt_no_text) {
+    $isdifferent = is_different_cmp($FILE, $tmpname);
 }
 else {
-    $isdifferent = is_different_diff($FILE, $output->filename, 1);
+    $isdifferent = is_different_diff($FILE, $tmpname, !$opt_quiet);
 }
 
 if ($isdifferent) {
-    rename($output->filename, $FILE) or die "rplc: rename: $!\n"; # FIXME
+    if ($opt_dry_run) {
+        warn "dry run mode; not replacing\n";
+        unlink $tmpname or general_err("unlink: $!: $tmpname");
+    }
+    else {
+        rename($tmpname, $FILE) 
+            or general_err("rename: $!: $tmpname -> $FILE\n")
+    }
+
+    exit($opt_exit_1_on_change ? 1 : 0);
 }
 elsif ($opt_mtime) {
-    system("touch", $FILE) and die;  # FIXME
+    system("touch", $FILE) and die "touch failed";
 }
 
+# Even if we don't end up replacing FILE, we'll set its metadata as requested.
+# Note slightly different logic from above - for this case, it would only
+# make sense to set properties based on command-line options, not on FILE's
+# properties, since this FILE that we're dealing with.
+my $FILEst = stat($FILE);
+
+if (defined($opt_mode) and $opt_mode != ($FILEst->mode & 07777)) {
+    chmod($opt_mode, $FILE) or general_err("$!: chmod $FILE");
+}
+
+if ($opt_owner) {
+    if (defined($targ_owner_id) and $targ_owner_id != $FILEst->uid) {
+        chown($targ_owner_id, -1, $FILE) 
+            or general_err("$!: chown failed: $FILE");
+    }
+}
+
+if ($opt_group) {
+    if (defined($targ_gid) and $targ_gid != $FILEst->gid) {
+        chown(-1, $targ_gid, $FILE) or general_err("$!: chown failed: $FILE");
+    }
+}
+
+unlink($tmpname) or general_err("unlink: $!: $tmpname");
+exit 0;
 
 # ======================== end of main =======================
 
@@ -124,6 +218,10 @@ elsif ($opt_mtime) {
 # Returns 1 if file contents are different, false otherwise.
 sub is_different_cmp {
     my ($f1, $f2) = @_;
+
+    # cmp (unlike diff -N) will have an error if one of the files to compare
+    # doesn't exist.
+    return 1 unless (-e $f1 and -e $f2);
 
     system(qw(cmp -s), $f1, $f2);
     my $ex = $?>>8;
@@ -136,7 +234,7 @@ sub is_different_cmp {
         return 1;
     }
     else {
-        warn "rplc: internal error: cmp exited with $ex\n";
+        err_intl("cmp exited with $ex\n");
         exit $EX_INTERNAL;
     }
 
@@ -153,23 +251,48 @@ sub is_different_cmp {
 sub is_different_diff {
     my ($f1, $f2, $show) = @_;
 
-    system(qw(diff -uN), $f1, $f2);
-    my $ex = $?>>8;
-
-    # FIXME: do this properly (using POSIX module)
-    if ($ex == 0) {
-        return;
-    }
-    elsif ($ex == 1) {
-        return 1;
+    if (fork) {
+        wait;
+        my $ex = $?>>8;
+    
+        # FIXME: do this properly (using POSIX module)
+        if ($ex == 0) {
+            return;
+        }
+        elsif ($ex == 1) {
+            return 1;
+        }
+        else {
+            err_intl("diff exited with $ex\n");
+            exit $EX_INTERNAL;
+        }
+    
+        # FIXME
+        # Need to deal properly with permission denied here.
     }
     else {
-        warn "rplc: internal error: diff exited with $ex\n";
-        exit $EX_INTERNAL;
+        $show or open(STDOUT, ">", "/dev/null");
+        exec(qw(diff -uN --label), $f1, qw(--label new), $f1, $f2) 
+            or die "exec failed: $!";
     }
+}
 
-    # FIXME
-    # Need to deal properly with permission denied here.
-    # Need to deal (somewhere) with FILE not existing yet, which should
-    # be allowed.
+sub general_err {
+    my ($msg) = @_;
+
+    warn "rplc: $msg\n";
+
+    # $tmpname - bad use of scoping
+    unlink $tmpname;
+    exit $EX_GENERAL;
+}
+
+sub intl_err {
+    my ($msg) = @_;
+
+    warn "rplc: internal error: $msg\n";
+
+    # $tmpname - bad use of scoping
+    unlink $tmpname;
+    exit $EX_INTERNAL;
 }
