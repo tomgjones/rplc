@@ -36,6 +36,11 @@ perhaps other encodings according to locale.
 
 =over 4
 
+=item -e, --exit
+
+If FILE is changed, exit with a code of 1.  Without this option, any
+successful completion of the program results in an exit code of zero.
+
 =item -n, --dry-run
 
 Don't do the final rename into place.
@@ -54,15 +59,19 @@ If FILE is unchanged, touch it (ie update its mtime to now).
 
 =item -m, --mode=MODE
 
-Set FILE's mode in octal (not implemented).
+Set FILE's mode in octal.  Even if FILE is not replaced, using
+this option will set its mode if its current mode is different.
 
-=item -w, --owner=OWNER
+=item -o, --owner=OWNER
 
-Set ownership (on most systems, superuser only). (not implemented).
+Set ownership (on most systems, superuser only).  Even if FILE is
+not replaced, using this option will set its owner if it's not
+already owned by OWNER.
 
 =item -g, --group=GROUP
 
-Set group ownership. (not implemented).
+Set group ownership.  Even if FILE is not replaced, using this option
+will set its group owner if it's not already group-owned by GROUP.
 
 =item -O, --no-owner
 
@@ -72,7 +81,7 @@ Don't attempt to make the new file have the same owner as the old file.
 
 Don't attempt to make the new file have the same group owner as the old file.
 
-=item -w, --no-ownership
+=item -W, --no-ownership
 
 Don't attempt to make the new file have either the same user or group
 owners as the old file.
@@ -90,9 +99,20 @@ No attempt will be made to display textual diffs.
 
 =head2 EXIT STATUS
 
+Exit codes 0, 1 (with the -e option), and 2 are analogous to
+those of diff(1) and cmp(1).
+
+Exit codes in the range 100-150 are used to indicate specific
+types of error.
+
 =over 4
 
 =item 1
+
+If the C<-e> option is given, then an exit code of 1 means the
+file was changed.
+
+=item 2
 
 General error status.
 
@@ -104,14 +124,6 @@ from rplc's standard output.
 =item 101
 
 rplc could not determine whether the file's content would change.
-
-=item 102
-
-Permission denied when trying to create temporary file.
-
-=item 103
-
-Permission denied when trying to rename file into place.
 
 =item 200
 
