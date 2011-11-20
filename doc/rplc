@@ -1,0 +1,141 @@
+=head1 NAME
+
+rplc - replace a file with the output of a program
+
+=head1 SYNOPSIS
+
+  rplc [OPTIONS] FILE [PROG [ARGS ...]]
+
+=head1 DESCRIPTION
+
+rplc replaces FILE with the contents of rplc's standard input, or
+if PROG [ARGS ...] is given, with the output of executing PROG with
+arguments ARGS.
+
+By default, the difference betwen the old version and the new
+version is displayed in C<diff -uN> format.
+
+If the content of FILE would not be changed, it is left in place.  
+
+If FILE is changed, the new version is put in place atomically (ie
+rename(2)d).   The resulting file will be a new inode, with the
+same user and group ownership (permissions allowing) and mode as the
+old file.  Support for other file metadata may be added in future.
+
+If PROG exits non-zero, rplc will not replace FILE, and will exit
+with code 100, printing PROG's exit code in decimal
+to standard output, followed
+by a newline.  The format is C<"child exited: %i\n", exit>, where
+C<exit> is the exit status of PROG.
+
+By default, rplc tries to treat the files' content as text.  It
+supports UTF-8 (and thus compatible encodings) and UTF-16, and
+perhaps other encodings according to locale.
+
+=head2 OPTIONS
+
+=over 4
+
+=item -n, --dry-run
+
+Don't do the final rename into place.
+
+=item -q, --quiet
+
+Don't show diffs.
+
+=item -b, --backup=BUPFILE
+
+If FILE will be replaced, store a copy in BUPFILE.
+
+=item -t, --mtime
+
+If FILE is unchanged, touch it (ie update its mtime to now).
+
+=item -m, --mode=MODE
+
+Set FILE's mode in octal (not implemented).
+
+=item -w, --owner=OWNER
+
+Set ownership (on most systems, superuser only). (not implemented).
+
+=item -g, --group=GROUP
+
+Set group ownership. (not implemented).
+
+=item -O, --no-owner
+
+Don't attempt to make the new file have the same owner as the old file.
+
+=item -G, --no-group
+
+Don't attempt to make the new file have the same group owner as the old file.
+
+=item -w, --no-ownership
+
+Don't attempt to make the new file have either the same user or group
+owners as the old file.
+
+=item -M, --no-mode
+
+Don't give the new file the same mode as the old file.
+
+=item -T, --no-text
+
+The content is not plain text in any of rplc's supported text encodings.
+No attempt will be made to display textual diffs.
+
+=back
+
+=head2 EXIT STATUS
+
+=over 4
+
+=item 1
+
+General error status.
+
+=item 100
+
+PROG exited non-zero.  In this case, PROG's exit code is available
+from rplc's standard output.
+
+=item 101
+
+rplc could not determine whether the file's content would change.
+
+=item 102
+
+Permission denied when trying to create temporary file.
+
+=item 103
+
+Permission denied when trying to rename file into place.
+
+=item 200
+
+Internal error.
+
+=back
+
+=head2 STANDARD OUTPUT
+
+General messages to the user are printed to standard output.  This includes
+diffs, and diagnostic messages.
+
+=head2 STANDARD ERROR
+
+Reporting of non-zero exit status of PROG (see above).
+
+May also be polluted by standard error of child processes in initial
+implemenation.
+
+=head1 TODO
+
+replace from a file?  Or have a separate program rplcf?  Or is redirecting
+rplc's standard input fine?
+
+Need to be able to specify user, group, mode precisely.
+
+=cut

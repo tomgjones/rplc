@@ -1,0 +1,175 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings FATAL => 'all';
+
+use File::Temp;
+use Getopt::Long qw( :config bundling no_ignore_case require_order );
+use Pod::Usage;
+use Readonly;
+
+Readonly my $EX_USAGE => 64;
+Readonly my $EX_SUBPROC => 100;
+Readonly my $EX_TMPPERM => 102;
+Readonly my $EX_INTERNAL => 200;
+
+# Implements rplc(1), defined in separate file.
+
+# The POD here is just for pod2usage's benefit.
+
+=head1 SYNOPSIS
+
+  rplc [OPTIONS] FILE [PROG [ARGS ...]]
+
+  Replace contents of FILE with rplc's standard input or output of PROG.
+
+  OPTIONS
+  -q,--quiet           don't show diffs
+  -b,--backup=BUPFILE  make a backup copy to BUPFILE on change
+  -c,--ctime           update ctime if unchanged
+  -O,--no-owner        don't try to preserve owner
+  -G,--no-group        don't try to preserve group
+  -o,--no-ownership    don't try to preserve owner or group
+  -M,--no-mode         don't try to preserve mode
+  -T,--no-text         content is not plain text
+
+=cut
+
+my ($opt_quiet, $opt_mtime, $opt_no_owner, $opt_no_group, $opt_no_ownership,
+    $opt_no_mode, $opt_backup, $opt_no_text);
+
+GetOptions(
+    'q|quiet'        => \$opt_quiet,
+    't|mtime'        => \$opt_mtime,
+    'O|no-owner'     => \$opt_no_owner,
+    'G|no-group'     => \$opt_no_group,
+    'w|no-ownership' => \$opt_no_ownership,
+    'M|no-mode'      => \$opt_no_mode,
+    'b|backup=s'     => \$opt_backup,
+    'T|no-text'      => \$opt_no_text,
+)
+    or pod2usage(-verbose => 0, -exitval => $EX_USAGE);
+
+my $conf_do_owner = not $opt_no_owner // $opt_no_ownership;
+my $conf_do_group = not $opt_no_group // $opt_no_ownership;
+
+my ($FILE, $PROG, @ARGS) = @ARGV;
+
+defined($FILE) or pod2usage(
+    -verbose => 0, -exitval => $EX_USAGE, -message => "missing arg FILE",
+);
+
+# may want to scope this so that it gets closed automatically
+my $input;
+
+if (defined($PROG)) {
+    open($input, "-|", $PROG, @ARGS) or ($! = 1, die "rplc: $PROG: $!\n");
+}
+else {
+    $input = \*STDIN;
+}
+
+my $output;
+eval {
+    $output = File::Temp->new(TEMPLATE => "$FILE.rplc.tmp.XXXXXXXXXX");
+};
+if ($@) {
+    # note: $! also is 'Permission denied' here
+
+    # File::Temp doesn't really have a well-specified enough API to be
+    # doing this.
+    if ($@ =~ 'Could not create temp file (.+): Permission denied') {
+        my $failfile = $1;
+        print "rplc: $failfile: Permission denied\n";
+        exit $EX_TMPPERM;
+    }
+    else {
+        print "rplc: internal error: $@\n";
+        exit $EX_INTERNAL;
+    }
+}
+
+# FIXME: set user, group, mode on output file
+
+while (<$input>) {
+    print $output $_;
+}
+
+if (defined($PROG)) {
+    wait;
+}
+
+my $isdifferent;
+if (! -f $FILE) {
+    $isdifferent = 1;
+}
+elsif ($opt_quiet or $opt_no_text) {
+    $isdifferent = is_different_cmp($FILE, $output->filename);
+}
+else {
+    $isdifferent = is_different_diff($FILE, $output->filename, 1);
+}
+
+if ($isdifferent) {
+    rename($output->filename, $FILE) or die "rplc: rename: $!\n"; # FIXME
+}
+elsif ($opt_mtime) {
+    system("touch", $FILE) and die;  # FIXME
+}
+
+
+# ======================== end of main =======================
+
+# is_different_cmp($f1, $f2)
+# Returns 1 if file contents are different, false otherwise.
+sub is_different_cmp {
+    my ($f1, $f2) = @_;
+
+    system(qw(cmp -s), $f1, $f2);
+    my $ex = $?>>8;
+
+    # FIXME: do this properly (using POSIX module)
+    if ($ex == 0) {
+        return;
+    }
+    elsif ($ex == 1) {
+        return 1;
+    }
+    else {
+        warn "rplc: internal error: cmp exited with $ex\n";
+        exit $EX_INTERNAL;
+    }
+
+    # FIXME
+    # Need to deal properly with permission denied here.
+    # Need to deal (somewhere) with FILE not existing yet, which should
+    # be allowed.
+}
+
+# is_different_diff($f1, $f2, $show)
+# Returns 1 if file contents are different, false otherwise.  If $show
+# is true, the diff is printed to the current process's output as a
+# side effect.
+sub is_different_diff {
+    my ($f1, $f2, $show) = @_;
+
+    system(qw(diff -uN), $f1, $f2);
+    my $ex = $?>>8;
+
+    # FIXME: do this properly (using POSIX module)
+    if ($ex == 0) {
+        return;
+    }
+    elsif ($ex == 1) {
+        return 1;
+    }
+    else {
+        warn "rplc: internal error: diff exited with $ex\n";
+        exit $EX_INTERNAL;
+    }
+
+    # FIXME
+    # Need to deal properly with permission denied here.
+    # Need to deal (somewhere) with FILE not existing yet, which should
+    # be allowed.
+}
