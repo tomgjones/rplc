@@ -8,6 +8,7 @@ use Getopt::Long qw( :config bundling no_ignore_case require_order );
 use IO::File;
 use Pod::Usage;
 use Readonly;
+#use Smart::Comments;
 use String::Random qw(random_regex);
 
 Readonly my $EX_GENERAL => 2;
@@ -177,6 +178,12 @@ if ($isdifferent) {
         unlink $tmpname or general_err("unlink: $!: $tmpname");
     }
     else {
+        if (defined($opt_backup)) {
+            unlink($opt_backup);
+
+            link($FILE, $opt_backup) 
+                or general_err("link: $!: $FILE $opt_backup");
+        }
         rename($tmpname, $FILE) 
             or general_err("rename: $!: $tmpname -> $FILE\n")
     }
@@ -283,6 +290,9 @@ sub general_err {
 
     # $tmpname - bad use of scoping
     unlink $tmpname;
+
+    warn "rplc: $msg\n";
+
     exit $EX_GENERAL;
 }
 

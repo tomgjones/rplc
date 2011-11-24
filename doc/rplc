@@ -51,7 +51,8 @@ Don't show diffs.
 
 =item -b, --backup=BUPFILE
 
-If FILE will be replaced, store a copy in BUPFILE.
+If FILE will be replaced, store a copy in BUPFILE.  BUPFILE must be on
+the same filesystem as FILE.
 
 =item -t, --mtime
 
