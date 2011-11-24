@@ -106,15 +106,15 @@ defined(my $output = IO::File->new($tmpname, O_CREAT|O_WRONLY)) or do {
 
 my $st = stat($FILE);
 
-my $cur_mode = defined($st) ? $st->mode  : undef;
-my $cur_own  = defined($st) ? $st->uid   : undef;
-my $cur_gr   = defined($st) ? $st->gid   : undef;
+my $cur_mode = defined($st) ? ($st->mode & 07777) : undef;
+my $cur_own  = defined($st) ? $st->uid            : undef;
+my $cur_gr   = defined($st) ? $st->gid            : undef;
 
 defined(my $tmpst = stat($output)) or intl_err("couldn't stat own output");
 
 # Work out the target mode, user, group, in outer block, as they'll come in
 # handy later too if we need to chmod / chown the file in place.
-my $targ_mode = $opt_mode // $cur_mode;
+my $targ_mode = defined($opt_mode) ? oct($opt_mode) : $cur_mode;
 
 my $targ_owner_id;
 if ($opt_owner) {
@@ -136,7 +136,8 @@ elsif (defined($cur_gr)) {
 
 
 if (!$opt_no_mode && defined($targ_mode)) {
-    chmod($targ_mode, $tmpname) or general_err("$!: chmod $targ_mode");
+    my $display = sprintf("%04o", $targ_mode);
+    chmod($targ_mode, $tmpname) or general_err("$!: chmod $display");
 }
 
 if ($conf_do_owner) {
@@ -192,8 +193,8 @@ elsif ($opt_mtime) {
 # properties, since this FILE that we're dealing with.
 my $FILEst = stat($FILE);
 
-if (defined($opt_mode) and $opt_mode != ($FILEst->mode & 07777)) {
-    chmod($opt_mode, $FILE) or general_err("$!: chmod $FILE");
+if (defined($opt_mode) and oct($opt_mode) != ($FILEst->mode & 07777)) {
+    chmod(oct($opt_mode), $FILE) or general_err("$!: chmod $FILE");
 }
 
 if ($opt_owner) {
@@ -223,7 +224,7 @@ sub is_different_cmp {
     # doesn't exist.
     return 1 unless (-e $f1 and -e $f2);
 
-    system(qw(cmp -s), $f1, $f2);
+    system(qw(cmp), $f1, $f2);
     my $ex = $?>>8;
 
     # FIXME: do this properly (using POSIX module)
@@ -234,7 +235,7 @@ sub is_different_cmp {
         return 1;
     }
     else {
-        err_intl("cmp exited with $ex\n");
+        intl_err("cmp exited with $ex\n");
         exit $EX_INTERNAL;
     }
 
@@ -263,7 +264,7 @@ sub is_different_diff {
             return 1;
         }
         else {
-            err_intl("diff exited with $ex\n");
+            intl_err("diff exited with $ex\n");
             exit $EX_INTERNAL;
         }
     
@@ -279,8 +280,6 @@ sub is_different_diff {
 
 sub general_err {
     my ($msg) = @_;
-
-    warn "rplc: $msg\n";
 
     # $tmpname - bad use of scoping
     unlink $tmpname;
