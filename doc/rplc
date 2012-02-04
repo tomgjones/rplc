@@ -18,9 +18,24 @@ version is displayed in C<diff -uN> format.
 If the content of FILE would not be changed, it is left in place.  
 
 If FILE is changed, the new version is put in place atomically (ie
-rename(2)d).   The resulting file will be a new inode, with the
-same user and group ownership (permissions allowing) and mode as the
-old file.  Support for other file metadata may be added in future.
+rename(2)d).   The resulting file will be from a new inode. 
+
+By default, rplc will preserve the mode based on the old file.  This can
+be overridden by the -m,--mode=MODE or -M,--no-mode options.
+
+If running as root, rplc will by default attempt to preserve
+the owner based on the old file.  This can be overridden with the
+-o,--owner=OWNER or -O,--no-owner options.  When running as another
+user, no attempt will be made to set the owner, unless -o,--owner=OWNER
+is given.  A warning is emitted
+if the owner is changed.
+
+rplc will by default attempt to preserve the group ownership based
+on the old file.  This can be overridden with -g, --group=GROUP or
+-G, --no-group.  Failure to set the file's group ownership is a
+fatal error.
+
+Support for other file metadata may be added in future.
 
 If PROG exits non-zero, rplc will not replace FILE, and will exit
 with code 100, printing PROG's exit code in decimal
@@ -41,9 +56,16 @@ perhaps other encodings according to locale.
 If FILE is changed, exit with a code of 1.  Without this option, any
 successful completion of the program results in an exit code of zero.
 
-=item -n, --dry-run
+=item -n, --no-write
 
-Don't do the final rename into place.
+Report on differences but don't write anything to the filesystem, even
+temporary files.
+
+=item -N, --dry-run
+
+Do everything except the final rename into place.  The temporary
+file is cleaned up, and parent directories are not created, so
+the filesystem is left with the same content afterwards.
 
 =item -q, --quiet
 
@@ -52,7 +74,8 @@ Don't show diffs.
 =item -b, --backup=BUPFILE
 
 If FILE will be replaced, store a copy in BUPFILE.  BUPFILE must be on
-the same filesystem as FILE.
+the same filesystem as FILE.  The backup file retains the filesystem
+metadata of the old file.
 
 =item -t, --mtime
 
@@ -95,6 +118,11 @@ Don't give the new file the same mode as the old file.
 
 The content is not plain text in any of rplc's supported text encodings.
 No attempt will be made to display textual diffs.
+
+=item -P, --no-parents
+
+rplc will normally create parent directories as required.  If this
+option is given, an error is raised instead.
 
 =back
 
@@ -150,5 +178,8 @@ replace from a file?  Or have a separate program rplcf?  Or is redirecting
 rplc's standard input fine?
 
 Need to be able to specify user, group, mode precisely.
+
+Could be different levels of dry run.  Currently doesn't write anything
+to fs.
 
 =cut
