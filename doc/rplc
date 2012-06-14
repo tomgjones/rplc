@@ -131,9 +131,6 @@ option is given, an error is raised instead.
 Exit codes 0, 1 (with the -e option), and 2 are analogous to
 those of diff(1) and cmp(1).
 
-Exit codes in the range 100-150 are used to indicate specific
-types of error.
-
 =over 4
 
 =item 1
