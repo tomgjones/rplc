@@ -1,0 +1,182 @@
+=head1 NAME
+
+rplc - replace a file with the output of a program
+
+=head1 SYNOPSIS
+
+  rplc [OPTIONS] FILE [PROG [ARGS ...]]
+
+=head1 DESCRIPTION
+
+rplc replaces FILE with the contents of rplc's standard input, or
+if PROG [ARGS ...] is given, with the output of executing PROG with
+arguments ARGS.
+
+By default, the difference betwen the old version and the new
+version is displayed in C<diff -uN> format.
+
+If the content of FILE would not be changed, it is left in place.  
+
+If FILE is changed, the new version is put in place atomically (ie
+rename(2)d).   The resulting file will be from a new inode. 
+
+By default, rplc will preserve the mode based on the old file.  This can
+be overridden by the -m,--mode=MODE or -M,--no-mode options.
+
+If running as root, rplc will by default attempt to preserve
+the owner based on the old file.  This can be overridden with the
+-o,--owner=OWNER or -O,--no-owner options.  When running as another
+user, no attempt will be made to set the owner, unless -o,--owner=OWNER
+is given.  A warning is emitted
+if the owner is changed.
+
+rplc will by default attempt to preserve the group ownership based
+on the old file.  This can be overridden with -g, --group=GROUP or
+-G, --no-group.  Failure to set the file's group ownership is a
+fatal error.
+
+Support for other file metadata may be added in future.
+
+If PROG exits non-zero, rplc will not replace FILE, and will exit
+with code 100, printing PROG's exit code in decimal
+to standard output, followed
+by a newline.  The format is C<"child exited: %i\n", exit>, where
+C<exit> is the exit status of PROG.
+
+By default, rplc tries to treat the files' content as text.  It
+supports UTF-8 (and thus compatible encodings) and UTF-16, and
+perhaps other encodings according to locale.
+
+=head2 OPTIONS
+
+=over 4
+
+=item -e, --exit
+
+If FILE is changed, exit with a code of 1.  Without this option, any
+successful completion of the program results in an exit code of zero.
+
+=item -n, --no-write
+
+Report on differences but don't write anything to the filesystem, even
+temporary files.
+
+=item -N, --dry-run
+
+Do everything except the final rename into place.  The temporary
+file is cleaned up, and parent directories are not created, so
+the filesystem is left with the same content afterwards.
+
+=item -q, --quiet
+
+Don't show diffs.
+
+=item -b, --backup=BUPFILE
+
+If FILE will be replaced, store a copy in BUPFILE.  BUPFILE must be on
+the same filesystem as FILE.  The backup file retains the filesystem
+metadata of the old file.
+
+=item -t, --mtime
+
+If FILE is unchanged, touch it (ie update its mtime to now).
+
+=item -m, --mode=MODE
+
+Set FILE's mode in octal.  Even if FILE is not replaced, using
+this option will set its mode if its current mode is different.
+
+=item -o, --owner=OWNER
+
+Set ownership (on most systems, superuser only).  Even if FILE is
+not replaced, using this option will set its owner if it's not
+already owned by OWNER.
+
+=item -g, --group=GROUP
+
+Set group ownership.  Even if FILE is not replaced, using this option
+will set its group owner if it's not already group-owned by GROUP.
+
+=item -O, --no-owner
+
+Don't attempt to make the new file have the same owner as the old file.
+
+=item -G, --no-group
+
+Don't attempt to make the new file have the same group owner as the old file.
+
+=item -W, --no-ownership
+
+Don't attempt to make the new file have either the same user or group
+owners as the old file.
+
+=item -M, --no-mode
+
+Don't give the new file the same mode as the old file.
+
+=item -T, --no-text
+
+The content is not plain text in any of rplc's supported text encodings.
+No attempt will be made to display textual diffs.
+
+=item -P, --no-parents
+
+rplc will normally create parent directories as required.  If this
+option is given, an error is raised instead.
+
+=back
+
+=head2 EXIT STATUS
+
+Exit codes 0, 1 (with the -e option), and 2 are analogous to
+those of diff(1) and cmp(1).
+
+=over 4
+
+=item 1
+
+If the C<-e> option is given, then an exit code of 1 means the
+file was changed.
+
+=item 2
+
+General error status.
+
+=item 100
+
+PROG exited non-zero.  In this case, PROG's exit code is available
+from rplc's standard output.
+
+=item 101
+
+rplc could not determine whether the file's content would change.
+
+=item 200
+
+Internal error.
+
+=back
+
+=head2 STANDARD OUTPUT
+
+General messages to the user are printed to standard output.  This includes
+diffs, and diagnostic messages.
+
+=head2 STANDARD ERROR
+
+Reporting of non-zero exit status of PROG (see above).
+
+May also be polluted by standard error of child processes in initial
+implemenation.
+
+=head1 TODO
+
+replace from a file?  Or have a separate program rplcf?  Or is redirecting
+rplc's standard input fine?
+
+Need to be able to specify user, group, mode precisely.
+
+Could be different levels of dry run.  Currently doesn't write anything
+to fs.
+
+=cut

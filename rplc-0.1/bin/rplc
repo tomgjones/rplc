@@ -1,0 +1,414 @@
+#!/usr/bin/perl
+
+=for comment
+
+Copyright 2012 Tom Jones <tom@oxix.org>.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+=cut
+
+use strict;
+use warnings FATAL => 'all';
+
+use File::Basename qw(dirname basename);
+use File::Path qw(make_path);
+use File::stat;
+use Getopt::Long qw( :config bundling no_ignore_case require_order );
+use IO::File;
+use IO::Pipe;
+use Pod::Usage;
+use Readonly;
+#use Smart::Comments;
+use String::Random qw(random_regex);
+
+Readonly my $EX_GENERAL => 2;
+Readonly my $EX_USAGE => 64;
+Readonly my $EX_SUBPROC => 100;
+Readonly my $EX_TMPPERM => 102;
+Readonly my $EX_INTERNAL => 200;
+
+# Implements rplc(1), defined in separate file.
+
+# The POD here is just for pod2usage's benefit.
+
+=head1 SYNOPSIS
+
+  rplc [OPTIONS] FILE [PROG [ARGS ...]]
+
+  Replace contents of FILE with rplc's standard input or output of PROG.
+
+  OPTIONS
+  -e,--exit            exit 1 if file changed
+  -n,--no-write        report on changes but don't write anything to filesystem
+  -N,--dry-run         everything is done except final rename
+  -q,--quiet           don't show diffs
+  -b,--backup=BUPFILE  make a backup copy to BUPFILE on change
+  -t,--mtime           update mtime if unchanged
+  -m,--mode=MODE       set file's mode in octal
+  -o,--owner=OWNER     set file's owner
+  -g,--group=GROUP     set file's group
+  -O,--no-owner        don't preserve owner
+  -G,--no-group        don't preserve group
+  -W,--no-ownership    don't preserve owner or group
+  -M,--no-mode         don't preserve mode
+  -T,--no-text         content is not plain text
+
+=cut
+
+my ($opt_quiet, $opt_mtime, $opt_no_owner, $opt_no_group, $opt_no_ownership,
+    $opt_no_mode, $opt_backup, $opt_no_text, $opt_exit_1_on_change,
+    $opt_no_write, $opt_dry_run, $opt_mode, $opt_owner, $opt_group, 
+    $opt_no_parents);
+
+GetOptions(
+    'e|exit'         => \$opt_exit_1_on_change,
+    'n|no-write'     => \$opt_no_write,
+    'N|dry-run'      => \$opt_dry_run,
+    'q|quiet'        => \$opt_quiet,
+    'b|backup=s'     => \$opt_backup,
+    't|mtime'        => \$opt_mtime,
+    'm|mode=s'       => \$opt_mode,
+    'o|owner=s'      => \$opt_owner,
+    'g|group=s'      => \$opt_group,
+    'O|no-owner'     => \$opt_no_owner,
+    'G|no-group'     => \$opt_no_group,
+    'W|no-ownership' => \$opt_no_ownership,
+    'M|no-mode'      => \$opt_no_mode,
+    'T|no-text'      => \$opt_no_text,
+    'P|no-parents'   => \$opt_no_parents,
+)
+    or pod2usage(-verbose => 0, -exitval => $EX_USAGE);
+
+$opt_no_ownership and ($opt_owner || $opt_group) and pod2usage(
+    -exitval => $EX_USAGE,
+    -message => "-W,--no-ownership conflicts with -o,--owner and -g,--group",
+);
+
+$opt_no_owner and defined($opt_owner) and pod2usage( -exitval => $EX_USAGE,
+    -message => "-o,--owner conflicts with -O,--no-owner");
+
+$opt_no_group and defined($opt_group) and pod2usage( -exitval => $EX_USAGE,
+    -message => "-g,--group conflicts with -G,--no-group");
+
+$opt_no_mode and defined($opt_mode) and pod2usage( -exitval => $EX_USAGE,
+    -message => "-m,--mode conflicts with -M,--no-mode");
+
+my $conf_do_owner = not $opt_no_owner // $opt_no_ownership;
+my $conf_do_group = not $opt_no_group // $opt_no_ownership;
+
+my ($FILE, $PROG, @ARGS) = @ARGV;
+
+defined($FILE) or pod2usage(
+    -verbose => 0, -exitval => $EX_USAGE, -message => "missing arg FILE",
+);
+
+# may want to scope this so that it gets closed automatically
+my $input;
+
+if (defined($PROG)) {
+    open($input, "-|", $PROG, @ARGS) or err_general("$!: $PROG\n");
+}
+else {
+    $input = \*STDIN;
+}
+
+my $tmpname;
+
+my $write_in_dir = dirname($FILE);
+my $destdir = $write_in_dir;
+my $tmpfile_basename = basename($FILE) . ".rplc.tmp." . random_regex('\w{16}');
+my $output;
+
+my ($targ_owner_id, $targ_gid, $targ_mode);
+
+if (!$opt_no_write) {
+    # create parent directories as required
+    if (! -d $write_in_dir) {
+        if ($opt_dry_run) {
+            while (! -d $write_in_dir) {
+                $write_in_dir = dirname($write_in_dir);
+            }
+        }
+        elsif ($opt_no_parents) {
+            warn "parent directory doesn't exist and -P,--no-parents option "
+                . "was given: $write_in_dir\n";
+            exit $EX_GENERAL;
+        }
+        else {
+            # make_path returns the number of directories created.
+            if (!make_path($destdir)) {
+                warn "$!: make_path $destdir\n";
+                exit $EX_GENERAL;
+            }
+        }
+    }
+    $tmpname = "$write_in_dir/$tmpfile_basename";
+
+    defined($output = IO::File->new($tmpname, O_CREAT|O_WRONLY)) or do {
+        warn "$!: $tmpname\n";
+        exit $EX_GENERAL;
+    };
+
+    my $st = stat($FILE);
+
+    my $cur_mode = defined($st) ? ($st->mode & 07777) : undef;
+    my $cur_own  = defined($st) ? $st->uid            : undef;
+    my $cur_gr   = defined($st) ? $st->gid            : undef;
+
+    defined(my $tmpst = stat($output)) or intl_err("couldn't stat own output");
+
+    # Work out the target mode, user, group, in outer block, as they'll come in
+    # handy later too if we need to chmod / chown the file in place.
+    $targ_mode = defined($opt_mode) ? oct($opt_mode) : $cur_mode;
+
+    if ($opt_owner) {
+        defined($targ_owner_id = getpwnam($opt_owner))
+            or general_err("failed to lookup user $opt_owner: $!\n");
+    }
+    elsif (defined($cur_own)) {
+        $targ_owner_id = $cur_own;
+    }
+
+    if ($opt_group) {
+        defined($targ_gid = getgrnam($opt_group))
+            or general_err("failed to lookup group $opt_group: $!\n");
+    }
+    elsif (defined($cur_gr)) {
+        $targ_gid = $cur_gr;
+    }
+
+    if (!$opt_no_mode && defined($targ_mode)) {
+        my $display = sprintf("%04o", $targ_mode);
+        chmod($targ_mode, $tmpname) or general_err("$!: chmod $display");
+    }
+
+    if ($conf_do_owner) {
+        if (defined($targ_owner_id) and $targ_owner_id != $tmpst->uid) {
+            chown($targ_owner_id, -1, $output) 
+                or general_err("$!: chown failed");
+        }
+    }
+
+    if ($conf_do_group) {
+        if (defined($targ_gid) and $targ_gid != $tmpst->gid) {
+            chown(-1, $targ_gid, $output) or general_err("$!: chown failed");
+        }
+    }
+
+    while (<$input>) {
+        print $output $_;
+    }
+    $output->close;
+
+    if (defined($PROG)) {
+        wait;
+    }
+}
+
+my $isdifferent;
+
+# If running normally, we've written the content out to a file.  If running
+# in no-write mode, we'll need to set up a pipe.
+my $new_content = $opt_no_write ? $input : $tmpname;
+
+if ($opt_quiet or $opt_no_text) {
+    $isdifferent = is_different_cmp($FILE, $new_content);
+}
+else {
+    $isdifferent = is_different_diff($FILE, $new_content, !$opt_quiet);
+}
+
+if (!$opt_no_write) {
+    if ($isdifferent) {
+        if ($opt_dry_run) {
+            warn "dry run mode; not replacing\n";
+            unlink $tmpname or general_err("unlink: $!: $tmpname");
+        }
+        else {
+            if (defined($opt_backup)) {
+                if (-f $FILE) {
+                    # assume failure is just "no such" for now
+                    unlink($opt_backup);
+              
+                    link($FILE, $opt_backup) 
+                        or general_err("link: $!: $FILE $opt_backup");
+                }
+                else {
+                    warn "warning: --backup option given, but no old "
+                        . "version of $FILE\n";
+                }
+            }
+            rename($tmpname, $FILE) 
+                or general_err("rename: $!: $tmpname -> $FILE\n")
+        }
+
+        exit($opt_exit_1_on_change ? 1 : 0);
+    }
+    elsif ($opt_mtime) {
+        system("touch", $FILE) and die "touch failed";
+    }
+
+    # Even if we don't end up replacing FILE, we'll set its metadata as 
+    # requested.
+    # Note slightly different logic from above - for this case, it would only
+    # make sense to set properties based on command-line options, not on FILE's
+    # properties, since this FILE that we're dealing with.
+    my $FILEst = stat($FILE);
+
+    if (defined($opt_mode) and oct($opt_mode) != ($FILEst->mode & 07777)) {
+        chmod(oct($opt_mode), $FILE) or general_err("$!: chmod $FILE");
+    }
+
+    if ($opt_owner) {
+        if (defined($targ_owner_id) and $targ_owner_id != $FILEst->uid) {
+            chown($targ_owner_id, -1, $FILE) 
+                or general_err("$!: chown failed: $FILE");
+        }
+    }
+
+    if ($opt_group) {
+        if (defined($targ_gid) and $targ_gid != $FILEst->gid) {
+            chown(-1, $targ_gid, $FILE) 
+                or general_err("$!: chown failed: $FILE");
+        }
+    }
+
+    unlink($tmpname) or general_err("unlink: $!: $tmpname");
+}
+
+if ($opt_exit_1_on_change && defined($isdifferent) and $isdifferent == 1) {
+    exit 1;
+}
+exit 0;
+
+# ======================== end of main =======================
+
+# is_different_cmp($f1, $f2)
+# Returns 1 if file contents are different, false otherwise.  $f2 can be
+# a file name or a file handle.
+sub is_different_cmp {
+    my ($f1, $f2) = @_;
+
+    # cmp (unlike diff -N) will have an error if one of the files to compare
+    # doesn't exist.
+    return 1 unless (-e $f1 and -e $f2);
+
+    if (ref($f2) eq 'GLOB') {
+        open(my $cmp, "|-", $f1, "-") or general_err("cmp: $!");
+        while (my $line = <$f2>) {
+            print $cmp $line;
+	}
+        close $cmp;
+    }
+    else {
+        system(qw(cmp), $f1, $f2);
+    }
+
+    my $ex = $?>>8;
+    # FIXME: do this properly (using POSIX module)
+    if ($ex == 0) {
+        return;
+    }
+    elsif ($ex == 1) {
+        return 1;
+    }
+    else {
+        intl_err("cmp exited with $ex\n");
+        exit $EX_INTERNAL;
+    }
+
+    # FIXME
+    # Need to deal properly with permission denied here.
+    # Need to deal (somewhere) with FILE not existing yet, which should
+    # be allowed.
+}
+
+# is_different_diff($f1, $f2, $show)
+# Returns 1 if file contents are different, false otherwise.  If $show
+# is true, the diff is printed to the current process's output as a
+# side effect.  $f2 can be a file name or a file handle.
+sub is_different_diff {
+    my ($f1, $f2, $show) = @_;
+
+    my $p;
+    if (ref($f2) eq 'GLOB') {
+        $p = IO::Pipe->new;
+    }
+
+    if (fork) {
+        if (ref($f2) eq 'GLOB') {
+            $p->writer;
+            while (my $line = <$f2>) {
+                print $p $line;
+            }
+            close $p;
+        }
+        wait;
+        my $ex = $?>>8;
+    
+        # FIXME: do this properly (using POSIX module)
+        if ($ex == 0) {
+            return;
+        }
+        elsif ($ex == 1) {
+            return 1;
+        }
+        else {
+            intl_err("diff exited with $ex\n");
+            exit $EX_INTERNAL;
+        }
+    
+        # FIXME
+        # Need to deal properly with permission denied here.
+    }
+    else {
+        if (ref($f2) eq 'GLOB') {
+            $p->reader;
+            open(STDIN, "<&", $p) or die $!;
+        }
+        $show or open(STDOUT, ">", "/dev/null");
+
+        my $diff2arg = (ref($f2) eq 'GLOB') 
+            # ? '-' 
+            # not portable, but diff -N doesn't work with "-", see
+            # <http://lists.gnu.org/archive/html/bug-diffutils/2012-02/>
+            ? "/dev/stdin" 
+            : $f2;
+
+        my @diff = (qw(diff -uN --label), $f1, qw(--label new), $f1, $diff2arg);
+
+        exec @diff or die "exec failed: $!";
+    }
+}
+
+sub general_err {
+    my ($msg) = @_;
+
+    # $tmpname - bad use of scoping
+    unlink $tmpname;
+
+    warn "rplc: $msg\n";
+
+    exit $EX_GENERAL;
+}
+
+sub intl_err {
+    my ($msg) = @_;
+
+    warn "rplc: internal error: $msg\n";
+
+    # $tmpname - bad use of scoping
+    unlink $tmpname;
+    exit $EX_INTERNAL;
+}
