@@ -133,16 +133,16 @@ those of diff(1) and cmp(1).
 
 =over 4
 
-=item 1
+=item "1"
 
 If the C<-e> option is given, then an exit code of 1 means the
 file was changed.
 
-=item 2
+=item "2"
 
 General error status.
 
-=item 100
+=item "100"
 
 PROG exited non-zero.  In this case, PROG's exit code is available
 from rplc's standard output.
