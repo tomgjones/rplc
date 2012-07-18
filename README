@@ -1,0 +1,220 @@
+<?xml version="1.0" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<title>rplc - replace a file with the output of a program</title>
+<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+<link rev="made" href="mailto:root@localhost" />
+</head>
+
+<body style="background-color: white">
+
+
+<!-- INDEX BEGIN -->
+<div name="index">
+<p><a name="__index__"></a></p>
+
+<ul>
+
+	<li><a href="#name">NAME</a></li>
+	<li><a href="#synopsis">SYNOPSIS</a></li>
+	<li><a href="#description">DESCRIPTION</a></li>
+	<ul>
+
+		<li><a href="#options">OPTIONS</a></li>
+		<li><a href="#exit_status">EXIT STATUS</a></li>
+		<li><a href="#standard_output">STANDARD OUTPUT</a></li>
+		<li><a href="#standard_error">STANDARD ERROR</a></li>
+	</ul>
+
+	<li><a href="#todo">TODO</a></li>
+</ul>
+
+<hr name="index" />
+</div>
+<!-- INDEX END -->
+
+<p>
+</p>
+<h1><a name="name">NAME</a></h1>
+<p>rplc - replace a file with the output of a program</p>
+<p>
+</p>
+<hr />
+<h1><a name="synopsis">SYNOPSIS</a></h1>
+<pre>
+  rplc [OPTIONS] FILE [PROG [ARGS ...]]</pre>
+<p>
+</p>
+<hr />
+<h1><a name="description">DESCRIPTION</a></h1>
+<p>rplc replaces FILE with the contents of rplc's standard input, or
+if PROG [ARGS ...] is given, with the output of executing PROG with
+arguments ARGS.</p>
+<p>By default, the difference betwen the old version and the new
+version is displayed in <code>diff -uN</code> format.</p>
+<p>If the content of FILE would not be changed, it is left in place.</p>
+<p>If FILE is changed, the new version is put in place atomically (ie
+rename(2)d).   The resulting file will be from a new inode.</p>
+<p>By default, rplc will preserve the mode based on the old file.  This can
+be overridden by the -m,--mode=MODE or -M,--no-mode options.</p>
+<p>If running as root, rplc will by default attempt to preserve
+the owner based on the old file.  This can be overridden with the
+-o,--owner=OWNER or -O,--no-owner options.  When running as another
+user, no attempt will be made to set the owner, unless -o,--owner=OWNER
+is given.  A warning is emitted
+if the owner is changed.</p>
+<p>rplc will by default attempt to preserve the group ownership based
+on the old file.  This can be overridden with -g, --group=GROUP or
+-G, --no-group.  Failure to set the file's group ownership is a
+fatal error.</p>
+<p>Support for other file metadata may be added in future.</p>
+<p>If PROG exits non-zero, rplc will not replace FILE, and will exit
+with code 100, printing PROG's exit code in decimal
+to standard output, followed
+by a newline.  The format is <code>&quot;child exited: %i\n&quot;, exit</code>, where
+<code>exit</code> is the exit status of PROG.</p>
+<p>By default, rplc tries to treat the files' content as text.  It
+supports UTF-8 (and thus compatible encodings) and UTF-16, and
+perhaps other encodings according to locale.</p>
+<p>
+</p>
+<h2><a name="options">OPTIONS</a></h2>
+<dl>
+<dt><strong><a name="e_exit" class="item">-e, --exit</a></strong></dt>
+
+<dd>
+<p>If FILE is changed, exit with a code of 1.  Without this option, any
+successful completion of the program results in an exit code of zero.</p>
+</dd>
+<dt><strong><a name="n_no_write" class="item">-n, --no-write</a></strong></dt>
+
+<dd>
+<p>Report on differences but don't write anything to the filesystem, even
+temporary files.</p>
+</dd>
+<dt><strong><a name="n_dry_run" class="item">-N, --dry-run</a></strong></dt>
+
+<dd>
+<p>Do everything except the final rename into place.  The temporary
+file is cleaned up, and parent directories are not created, so
+the filesystem is left with the same content afterwards.</p>
+</dd>
+<dt><strong><a name="q_quiet" class="item">-q, --quiet</a></strong></dt>
+
+<dd>
+<p>Don't show diffs.</p>
+</dd>
+<dt><strong><a name="b_backup_bupfile" class="item">-b, --backup=BUPFILE</a></strong></dt>
+
+<dd>
+<p>If FILE will be replaced, store a copy in BUPFILE.  BUPFILE must be on
+the same filesystem as FILE.  The backup file retains the filesystem
+metadata of the old file.</p>
+</dd>
+<dt><strong><a name="t_mtime" class="item">-t, --mtime</a></strong></dt>
+
+<dd>
+<p>If FILE is unchanged, touch it (ie update its mtime to now).</p>
+</dd>
+<dt><strong><a name="m_mode_mode" class="item">-m, --mode=MODE</a></strong></dt>
+
+<dd>
+<p>Set FILE's mode in octal.  Even if FILE is not replaced, using
+this option will set its mode if its current mode is different.</p>
+</dd>
+<dt><strong><a name="o_owner_owner" class="item">-o, --owner=OWNER</a></strong></dt>
+
+<dd>
+<p>Set ownership (on most systems, superuser only).  Even if FILE is
+not replaced, using this option will set its owner if it's not
+already owned by OWNER.</p>
+</dd>
+<dt><strong><a name="g_group_group" class="item">-g, --group=GROUP</a></strong></dt>
+
+<dd>
+<p>Set group ownership.  Even if FILE is not replaced, using this option
+will set its group owner if it's not already group-owned by GROUP.</p>
+</dd>
+<dt><strong><a name="o_no_owner" class="item">-O, --no-owner</a></strong></dt>
+
+<dd>
+<p>Don't attempt to make the new file have the same owner as the old file.</p>
+</dd>
+<dt><strong><a name="g_no_group" class="item">-G, --no-group</a></strong></dt>
+
+<dd>
+<p>Don't attempt to make the new file have the same group owner as the old file.</p>
+</dd>
+<dt><strong><a name="w_no_ownership" class="item">-W, --no-ownership</a></strong></dt>
+
+<dd>
+<p>Don't attempt to make the new file have either the same user or group
+owners as the old file.</p>
+</dd>
+<dt><strong><a name="m_no_mode" class="item">-M, --no-mode</a></strong></dt>
+
+<dd>
+<p>Don't give the new file the same mode as the old file.</p>
+</dd>
+<dt><strong><a name="t_no_text" class="item">-T, --no-text</a></strong></dt>
+
+<dd>
+<p>The content is not plain text in any of rplc's supported text encodings.
+No attempt will be made to display textual diffs.</p>
+</dd>
+<dt><strong><a name="p_no_parents" class="item">-P, --no-parents</a></strong></dt>
+
+<dd>
+<p>rplc will normally create parent directories as required.  If this
+option is given, an error is raised instead.</p>
+</dd>
+</dl>
+<p>
+</p>
+<h2><a name="exit_status">EXIT STATUS</a></h2>
+<p>Exit codes 0, 1 (with the -e option), and 2 are analogous to
+those of <code>diff(1)</code> and <code>cmp(1)</code>.</p>
+<ol>
+<li>
+<p>If the <code>-e</code> option is given, then an exit code of 1 means the
+file was changed.</p>
+</li>
+<li>
+<p>General error status.</p>
+</li>
+<li>
+<p>PROG exited non-zero.  In this case, PROG's exit code is available
+from rplc's standard output.</p>
+</li>
+<li>
+<p>rplc could not determine whether the file's content would change.</p>
+</li>
+<li>
+<p>Internal error.</p>
+</li>
+</ol>
+<p>
+</p>
+<h2><a name="standard_output">STANDARD OUTPUT</a></h2>
+<p>General messages to the user are printed to standard output.  This includes
+diffs, and diagnostic messages.</p>
+<p>
+</p>
+<h2><a name="standard_error">STANDARD ERROR</a></h2>
+<p>Reporting of non-zero exit status of PROG (see above).</p>
+<p>May also be polluted by standard error of child processes in initial
+implemenation.</p>
+<p>
+</p>
+<hr />
+<h1><a name="todo">TODO</a></h1>
+<p>replace from a file?  Or have a separate program rplcf?  Or is redirecting
+rplc's standard input fine?</p>
+<p>Need to be able to specify user, group, mode precisely.</p>
+<p>Could be different levels of dry run.  Currently doesn't write anything
+to fs.</p>
+
+</body>
+
+</html>
