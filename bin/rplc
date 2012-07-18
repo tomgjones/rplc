@@ -386,7 +386,7 @@ sub is_different_diff {
             ? "/dev/stdin" 
             : $f2;
 
-        my @diff = (qw(diff -uN --label), $f1, qw(--label new), $f1, $diff2arg);
+        my @diff = (qw(diff -uN --label), 'old', qw(--label), $f1, $f1, $diff2arg);
 
         exec @diff or die "exec failed: $!";
     }
