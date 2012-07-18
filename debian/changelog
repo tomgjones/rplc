@@ -1,3 +1,9 @@
+rplc (0.2) unstable; urgency=low
+
+  * Update to version 0.2 (see upstream ChangeLog).
+
+ -- Tom Jones <tom@oxix.org>  Wed, 18 Jul 2012 01:05:39 +0100
+
 rplc (0.1) unstable; urgency=low
 
   * Initial Release.
