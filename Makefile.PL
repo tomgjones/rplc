@@ -1,7 +1,7 @@
 use ExtUtils::MakeMaker;
 WriteMakefile(
     NAME      => 'rplc',
-    VERSION   => '0.2',
+    VERSION   => '0.3',
     ABSTRACT  => 'Replace contents of a file with output from a program',
     AUTHOR    => 'Tom Jones <tom@oxix.org>',
     EXE_FILES => [ glob('bin/*') ],

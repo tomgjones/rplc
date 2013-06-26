@@ -28,6 +28,7 @@ use Getopt::Long qw( :config bundling no_ignore_case require_order );
 use IO::File;
 use IO::Pipe;
 use Pod::Usage;
+use POSIX qw(WIFSIGNALED WIFEXITED WEXITSTATUS WTERMSIG);
 use Readonly;
 #use Smart::Comments;
 use String::Random qw(random_regex);
@@ -212,7 +213,19 @@ if (!$opt_no_write) {
     $output->close;
 
     if (defined($PROG)) {
-        wait;
+        $input->close; # wait()s for subproc
+        if( WIFSIGNALED( $? ) ) {
+            warn "$PROG died with signal " . WTERMSIG( $? ) . "\n";
+            unlink $tmpname;
+            exit 199;
+        }
+        elsif( WIFEXITED( $? ) and WEXITSTATUS( $? ) != 0 ) {
+            warn "$PROG exited with value " . WEXITSTATUS( $? ) . "\n";
+            print WEXITSTATUS( $? ) . "\n";
+            unlink $tmpname;
+            exit 100;
+        }
+
     }
 }
 

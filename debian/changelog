@@ -1,3 +1,9 @@
+rplc (0.3) UNRELEASED; urgency=low
+
+  * Update to version 0.3 (see upstream ChangeLog).
+
+ -- Tom Jones <tom@oxix.org>  Wed, 26 Jun 2013 20:45:34 +0100
+
 rplc (0.2) unstable; urgency=low
 
   * Update to version 0.2 (see upstream ChangeLog).
