@@ -1,8 +1,8 @@
-rplc (0.3) UNRELEASED; urgency=low
+rplc (0.2.1) UNRELEASED; urgency=low
 
-  * Update to version 0.3 (see upstream ChangeLog).
+  * Depend on libstring-random-perl.
 
- -- Tom Jones <tom@oxix.org>  Wed, 26 Jun 2013 20:45:34 +0100
+ -- Tom Jones <tom.jones@bccx.com>  Mon, 01 Jul 2013 12:48:54 +0100
 
 rplc (0.2) unstable; urgency=low
 

@@ -8,5 +8,5 @@ Standards-Version: 3.9.1
 
 Package: rplc
 Architecture: all
-Depends: ${misc:Depends}, ${perl:Depends}
+Depends: ${misc:Depends}, ${perl:Depends}, libstring-random-perl
 Description: Replace contents of a file with output from a program
